@@ -1,0 +1,19 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments (if you use run.sh)
+.venv/
+venv/
+ENV/
+
+# Local execution outputs / artifacts
+RESULT.smv
+*.log
+
+# Editor / IDE settings
+.vscode/
+.idea/
+*.swp
+.DS_Store
