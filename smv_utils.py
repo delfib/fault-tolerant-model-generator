@@ -1,18 +1,21 @@
 import re
+from typing import Tuple
 
-def load_smv(path):
+
+def load_smv(path: str) -> str:
+    """Loads and returns the text contents of an SMV file safely """
     try:
         with open(path, "r") as f:
             return f.read()
     except FileNotFoundError:
-        raise ValueError(f"SMV file not found: {path}")
+        raise ValueError(f"SMV file not found, target path failed to resolve: '{path}'")
 
-def save_smv(path, content):
+def save_smv(path: str, content: str) -> None:
     with open(path, "w") as f:
         f.write(content)
 
 
-def find_module(content, module_name):
+def find_module(content: str, module_name: str) -> Tuple[int, int]:
     """Returns (start_index, end_index) of MODULE <module_name>"""
     lines = content.splitlines(keepends=True)
 
@@ -24,7 +27,7 @@ def find_module(content, module_name):
             break
 
     if start is None:
-        raise ValueError(f"MODULE {module_name} not found")
+        raise ValueError(f"'MODULE {module_name}' declaration block was not found")
 
     for j in range(start + 1, len(lines)):
         if lines[j].strip().startswith("MODULE "):
@@ -32,14 +35,15 @@ def find_module(content, module_name):
 
     return start, len(lines)
 
-def get_module_text(smv_content, module_name):
+
+def get_module_text(smv_content: str, module_name: str) -> str:
     """Extract the full text of a named MODULE from an SMV file."""
     start, end = find_module(smv_content, module_name)
     lines = smv_content.splitlines(keepends=True)
     return ''.join(lines[start:end])
 
 
-def strip_main_module(smv_content):
+def strip_main_module(smv_content: str) -> str:
     """Remove MODULE main from the nominal SMV content."""
     result = re.sub(
         r'\n*--[^\n]*\n--[^\n]*[Mm]ain[^\n]*\n--[^\n]*\nMODULE main.*',

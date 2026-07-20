@@ -1,37 +1,42 @@
 import re
 from abc import ABC, abstractmethod
+from typing import List
 
 class BaseInjector(ABC):
     def __init__(self, faults):
         self.faults = faults
 
     @abstractmethod
-    def inject(self, module_text, module_name, redundancy):
+    def inject(self, module_text: str, module_name: str) -> str:
         pass
 
-    def _add_to_var_block(self, module_text, statements):
-        """Helper to safely insert declarations into the VAR block."""
+    def _add_to_var_block(self, module_text: str, statements: str) -> str:
+        """Safely inserts declarations into a VAR block."""
+        if "VAR\n" not in module_text:
+            raise ValueError("Injector Error: 'VAR' structure block is missing.")
         return module_text.replace("VAR\n", f"VAR\n{statements}\n")
 
-    def _add_to_assign_block(self, module_text, init_statement, next_statement):
+    def _add_to_assign_block(self, module_text: str, init_statement: str, next_statement: str) -> str:
         """
-        Safely places the init statement right at the top of ASSIGN,
-        and places the next statement right before the first existing next() block.
+        Safely appends init statement right at the top of ASSIGN,
+        and next statement right before the first existing next() block.
         """
+        if "ASSIGN\n" not in module_text:
+            raise ValueError("Injector Error: 'ASSIGN' structure block is missing.")
+            
         module_text = module_text.replace("ASSIGN\n", f"ASSIGN\n{init_statement}\n")
         
         if "next(" in module_text:
             module_text = re.sub(r"(\s+next\()", f"\n{next_statement}\n\\1", module_text, count=1)
         else:
-            # if no next statements exist yet
             module_text += f"\n{next_statement}\n"
             
         return module_text
 
-    def _suppress_side_effects(self, module_text, toggle_vars):
+    def _suppress_side_effects(self, module_text: str, toggle_vars: List[str]) -> str:
         """
         Prefixes functional next() blocks with 'fault_mode = none &' 
-        to disable toggles or metrics counters while faulted.
+        to prevent side effects while faulted.
         """
         # Determine which variables are currently declared in the module
         declared_guards = []
@@ -42,11 +47,11 @@ class BaseInjector(ABC):
 
         for var in toggle_vars:
             pattern = rf"(next\({var}\)\s*:=\s*case\n)(\s*)([^\n]+)"
-            
+
             match = re.search(pattern, module_text)
             if match:
                 header, indent, first_line = match.groups()
-                
+
                 # Check which of the declared guards are not already present in this specific block's first line
                 missing_guards = [g for g in declared_guards if g not in first_line]
                 
