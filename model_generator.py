@@ -1,6 +1,9 @@
+from typing import Dict
 from protocol_extenders.extender_factory import create_extender
 from fault_injectors.injector_factory import create_injector
 from smv_utils import get_module_text, strip_main_module
+from xml_parser import FaultModel, ModuleConfig
+
 
 class ModelGenerator:
     """
@@ -9,13 +12,13 @@ class ModelGenerator:
         2. Extend the protocol according to redundancy.
         3. Inject faults into the requested modules.
         4. Assemble the final SMV model.
-    """
-    def __init__(self, fault_model):
-        self.fault_model = fault_model
+    """    
+    def __init__(self, fault_model: FaultModel) -> None:
+        self.fault_model: FaultModel = fault_model
 
 
-    def generate(self, smv_content):
-        """Receives the nominal SMV model and returns the fully generated model."""
+    def generate(self, smv_content: str) -> str:
+        """Receives the nominal SMV model and returns the generated extended model."""
 
         modules = self._extract_modules(smv_content)
         extender = create_extender(self.fault_model.protocol_type)
@@ -25,17 +28,20 @@ class ModelGenerator:
         return self._assemble_model(smv_content, modules)
 
 
-    def _extract_modules(self, smv_content):
-        """Extract all nominal modules from the SMV file."""
-        return {
-            "queue": get_module_text(smv_content, "Queue"),
-            "client": get_module_text(smv_content, "Client"),
-            "server": get_module_text(smv_content, "Server"),
-            "wrapper": get_module_text(smv_content, "Nominal")
-        }
+    def _extract_modules(self, smv_content: str) -> Dict[str, str]:
+        """Extract all nominal modules from the nominal SMV file."""
+        try:
+            return {
+                "queue": get_module_text(smv_content, "Queue"),
+                "client": get_module_text(smv_content, "Client"),
+                "server": get_module_text(smv_content, "Server"),
+                "wrapper": get_module_text(smv_content, "Nominal")
+            }
+        except ValueError as err:
+            raise ValueError(f"Failed to extract base modules from input SMV. Details: {err}") from err
 
 
-    def _inject_faults(self, modules):
+    def _inject_faults(self, modules: Dict[str, str]) -> Dict[str, str]:
         """Inject faults into ClientExtended and/or ServerExtended when requested."""
         client_cfg = self.fault_model.modules.get("Client")
         server_cfg = self.fault_model.modules.get("Server")
@@ -49,7 +55,7 @@ class ModelGenerator:
         return modules
 
 
-    def _inject_module_faults(self, module_text, module_name, module_cfg):
+    def _inject_module_faults(self, module_text: str, module_name: str, module_cfg: ModuleConfig) -> str:
         """
         Apply all fault injectors required by a module.
         Faults are grouped by type and each injector is applied once.
@@ -61,13 +67,13 @@ class ModelGenerator:
 
         for faults in fault_groups.values():
             injector = create_injector(faults)
-            module_text = injector.inject(module_text=module_text, module_name=module_name, redundancy=module_cfg.redundancy)
+            module_text = injector.inject(module_text=module_text, module_name=module_name)
 
         return module_text
 
 
-    def _assemble_model(self, original_smv, modules):
-        """Assemble the final generated SMV model"""
+    def _assemble_model(self, original_smv: str, modules: Dict[str, str]) -> str:
+        """Assemble the final generated extended SMV model"""
         nominal_base = strip_main_module(original_smv)
 
         # Build the LTLSPEC section from the parsed properties

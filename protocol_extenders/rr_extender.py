@@ -2,13 +2,16 @@ import re
 from protocol_extenders.base_extender import BaseExtender, MAX_REDUNDANCY
 
 class RRExtender(BaseExtender):
-
-    def extend_queue(self, text):
+    """
+    Extends the nominal protocol model to support redundant clients and servers
+    under the RR protocol.
+    """
+    def extend_queue(self, text: str) -> str:
         n_clients, n_servers = self._get_redundancy(self._fault_model)
         return self._extend_queue_with_producer_id(text, n_clients, n_servers)
 
 
-    def extend_client(self, text):
+    def extend_client(self, text: str) -> str:
         n_clients, n_servers = self._get_redundancy(self._fault_model)
 
         text = re.sub(
@@ -16,7 +19,7 @@ class RRExtender(BaseExtender):
             r'MODULE ClientExtended(\1, ack_owners, client_id, client_states)',
             text
         )
-        
+
         text = text.replace(
             '    ack_received : boolean;',
             '    ack_received : boolean;\n    request_sent : boolean;'
@@ -75,13 +78,15 @@ class RRExtender(BaseExtender):
         return text
 
 
-    def extend_server(self, text):
+    def extend_server(self, text: str) -> str:
         n_clients, n_servers = self._get_redundancy(self._fault_model)
 
         text = re.sub(
             r'MODULE\s+Server\s*\(([^)]+)\)',
-            r'MODULE ServerExtended(\1, server_id)', text)
+            r'MODULE ServerExtended(\1, server_id)', text
+        )
 
+        
         # Add new VARs
         text = text.replace(
             '    request_received : boolean;',
@@ -91,7 +96,7 @@ class RRExtender(BaseExtender):
             '    ack_consume_marker : boolean;'
         )
 
-        # Add new inits
+        # Add new initializations
         text = text.replace(
             '    init(request_received) := FALSE;',
             '    init(request_received) := FALSE;\n'
@@ -142,9 +147,8 @@ class RRExtender(BaseExtender):
         return text
 
 
-    def extend_wrapper(self):
+    def extend_wrapper(self) -> str:
         n_clients, n_servers = self._get_redundancy(self._fault_model)
-
         full_clt_enum = ', '.join(['none'] + [f'clt{i}' for i in range(MAX_REDUNDANCY)])
 
         var_arrays = (

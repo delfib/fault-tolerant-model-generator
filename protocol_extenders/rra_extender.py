@@ -1,14 +1,16 @@
 import re
-from protocol_extenders.base_extender import MAX_REDUNDANCY, BaseExtender
-
+from protocol_extenders.base_extender import BaseExtender, MAX_REDUNDANCY
 class RRAExtender(BaseExtender):
-
-    def extend_queue(self, text):
+    """
+    Extends the nominal protocol model to support redundant clients and servers
+    under the RRA protocol.
+    """
+    def extend_queue(self, text: str) -> str:
         n_clients, n_servers = self._get_redundancy(self._fault_model)
         return self._extend_queue_with_producer_id(text, n_clients, n_servers)
 
 
-    def extend_client(self, text):
+    def extend_client(self, text: str) -> str:
         n_clients, n_servers = self._get_redundancy(self._fault_model)
 
         text = re.sub(
@@ -20,7 +22,7 @@ class RRAExtender(BaseExtender):
         # Add new variables to VAR
         seen_vars = '\n'.join(f'    client_ack_srv{i}_seen    : boolean;' for i in range(MAX_REDUNDANCY))
         srv_enum = ', '.join([f'srv{i}' for i in range(MAX_REDUNDANCY)])
-        
+
         new_vars = (
             f'    request_sent            : boolean;\n'
             f'    ack_source              : {{none, {srv_enum}}};\n'
@@ -44,13 +46,13 @@ class RRAExtender(BaseExtender):
 
         pending_states_guard = ' & '.join(f'pending_reply_ack_states[{i}] = FALSE' for i in range(n_clients))
         sent_states_guard = ' & '.join(f'reply_ack_sent_states[{i}] = TRUE' for i in range(n_clients))
-        
+
         sending_guard = (
             f' & request_queue.next_producer_turn = client_id &\n'
             f'        ({pending_states_guard}) &\n'
             f'        ({sent_states_guard})'
         )
-        
+
         ack_owners_guard = ' | '.join(f'ack_owners[{i}] = self_id' for i in range(n_servers))
 
         nominal_send_cond = 'client_request_state = sending & !request_queue.queue_full & reply_ack_sent & !pending_reply_ack'
@@ -121,8 +123,7 @@ class RRAExtender(BaseExtender):
 
         return text
 
-
-    def extend_server(self, text):
+    def extend_server(self, text: str) -> str:
         n_clients, n_servers = self._get_redundancy(self._fault_model)
 
         text = re.sub(
@@ -155,7 +156,6 @@ class RRAExtender(BaseExtender):
         )
 
         rra_receive_guard = '& !pending_ack & !request_queue.request_consumed & request_queue.next_consumer_turn = server_id'
-        
         reply_ack_owners_guard = ' | '.join(f'reply_ack_owners[{i}] = self_id' for i in range(n_clients))
 
         nominal_receive_cond = 'server_request_state = receiving & !request_queue.queue_empty & reply_ack_received'
@@ -210,8 +210,7 @@ class RRAExtender(BaseExtender):
 
         return text
 
-
-    def extend_wrapper(self):
+    def extend_wrapper(self) -> str:
         n_clients, n_servers = self._get_redundancy(self._fault_model)
 
         full_clt_enum = ', '.join(['none'] + [f'clt{i}' for i in range(MAX_REDUNDANCY)])

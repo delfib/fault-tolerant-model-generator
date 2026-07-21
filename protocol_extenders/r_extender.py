@@ -2,16 +2,20 @@ import re
 from protocol_extenders.base_extender import BaseExtender, MAX_REDUNDANCY
 
 class RExtender(BaseExtender):
-
-    def extend_queue(self, text):
+    """
+    Extends the nominal protocol model to support redundant clients and servers
+    under the R protocol.
+    """
+    def extend_queue(self, text: str) -> str:
         n_clients, n_servers = self._get_redundancy(self._fault_model)
         return self._extend_queue_base(text, n_clients, n_servers, 'client', 'server')
 
 
-    def extend_client(self, text):
+    def extend_client(self, text: str) -> str:
         text = re.sub(
             r'MODULE\s+Client\s*\(([^)]+)\)',
-            r'MODULE ClientExtended(\1, client_id, client_states)', text)
+            r'MODULE ClientExtended(\1, client_id, client_states)', text
+        )
 
         # Build the all-sending guard (same for all 3 replacements)
         all_sending = (' & '.join(f'client_states[{i}] = sending' for i in range(MAX_REDUNDANCY)))
@@ -28,10 +32,11 @@ class RExtender(BaseExtender):
         return text
 
 
-    def extend_server(self, text):
+    def extend_server(self, text: str) -> str:
         text = re.sub(
             r'MODULE\s+Server\s*\(([^)]+)\)',
-            r'MODULE ServerExtended(\1, server_id)', text)
+            r'MODULE ServerExtended(\1, server_id)', text
+        )
 
         text = text.replace(
             'server_state = receiving & !queue.empty',
@@ -41,7 +46,7 @@ class RExtender(BaseExtender):
         return text
 
 
-    def extend_wrapper(self):
+    def extend_wrapper(self) -> str:
         n_clients, n_servers = self._get_redundancy(self._fault_model)
 
         var_arrays = (
@@ -60,14 +65,9 @@ class RExtender(BaseExtender):
             for i in range(n_servers)
         )
 
-        assign_client_toggles = self._assign_array_from_modules('client_toggles', 'client',
-            'request_toggle', n_clients, MAX_REDUNDANCY)
-
-        assign_server_toggles = self._assign_array_from_modules('server_toggles', 'server',
-            'request_toggle', n_servers, MAX_REDUNDANCY)
-
-        assign_client_states = self._assign_array_from_modules('client_states', 'client',
-            'client_state', n_clients, MAX_REDUNDANCY, 'sending')
+        assign_client_toggles = self._assign_array_from_modules('client_toggles', 'client', 'request_toggle', n_clients, MAX_REDUNDANCY)
+        assign_server_toggles = self._assign_array_from_modules('server_toggles', 'server', 'request_toggle', n_servers, MAX_REDUNDANCY)
+        assign_client_states = self._assign_array_from_modules('client_states', 'client', 'client_state', n_clients, MAX_REDUNDANCY, 'sending')
 
         return (
             f'MODULE Extended()\n'

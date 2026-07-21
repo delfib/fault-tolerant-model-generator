@@ -4,7 +4,7 @@ from protocol_extenders.rra_extender import RRAExtender
 
 def create_extender(protocol_type):
     """Protocol Extender Factory that returns the correct protocol extender."""
-    protocol_type = protocol_type.upper()
+    protocol_type = protocol_type.strip().upper()
 
     if protocol_type == "R":
         return RExtender()
@@ -15,4 +15,4 @@ def create_extender(protocol_type):
     if protocol_type == "RRA":
         return RRAExtender()
 
-    raise ValueError(f"Unsupported protocol type '{protocol_type}'")
+    raise ValueError(f"Extender Factory Exception: Unsupported protocol type '{protocol_type}'")

@@ -1,17 +1,20 @@
 import re
 from abc import ABC, abstractmethod
+from typing import Dict, Tuple
+from xml_parser import FaultModel
 
 MAX_REDUNDANCY = 10
 
-def _array_bound(n):
+def _array_bound(n: int) -> str:
     return f'0..{n - 1}'
 
-def _init_set(n):
+def _init_set(n: int) -> str:
     return '{' + ','.join(str(i) for i in range(n)) + '}'
+
 
 class BaseExtender(ABC):
 
-    def _get_redundancy(self, fault_model):
+    def _get_redundancy(self, fault_model: FaultModel) -> Tuple[int, int]:
         client_cfg = fault_model.modules.get("Client")
         server_cfg = fault_model.modules.get("Server")
         n_clients = client_cfg.redundancy if client_cfg else 1
@@ -19,27 +22,33 @@ class BaseExtender(ABC):
         return n_clients, n_servers
 
 
-    def _extend_queue_base(self, text, n_producers, n_consumers, producer_name, consumer_name):
+    def _extend_queue_base(self, text: str, n_producers: int, n_consumers: int, producer_name: str, consumer_name: str) -> str:
         """Shared queue extension logic for all protocols."""
         prod, cons = producer_name, consumer_name
 
-        # Rename module and parameters
+        if "ASSIGN" not in text:
+            raise ValueError("Queue Extension Error: 'ASSIGN' structure block is missing.")
+
+        # Rename module parameters
         text = re.sub(
             r'MODULE\s+Queue\s*\(([^,]+),\s*([^,]+),\s*([^)]+)\)',
-            rf'MODULE QueueExtended(\1, {prod}_toggles, {cons}_toggles)', text)
+            rf'MODULE QueueExtended(\1, {prod}_toggles, {cons}_toggles)', text
+        )
 
         # Expand VAR toggle arrays
         for side in (prod, cons):
             text = re.sub(
                 rf'last_{side}_toggle\s*:\s*boolean;',
-                f'last_{side}_toggle : array {_array_bound(MAX_REDUNDANCY)} of boolean;', text)
+                f'last_{side}_toggle : array {_array_bound(MAX_REDUNDANCY)} of boolean;', text
+            )
 
         # Add turn vars to VAR
         text = text.replace(
             'ASSIGN',
             f'    next_{prod}_turn : 0..{MAX_REDUNDANCY - 1};\n'
             f'    next_{cons}_turn : 0..{MAX_REDUNDANCY - 1};\n\n'
-            f'ASSIGN', 1)
+            f'ASSIGN', 1
+        )
 
         # Replace single inits with per-slot inits
         for side in (prod, cons):
@@ -54,17 +63,20 @@ class BaseExtender(ABC):
             last_cons_init,
             last_cons_init
             + f'\n    init(next_{prod}_turn) := {_init_set(n_producers)};'
-            + f'\n    init(next_{cons}_turn) := {_init_set(n_consumers)};', 1)
+            + f'\n    init(next_{cons}_turn) := {_init_set(n_consumers)};', 1
+        )
 
         # Replace next(tail) and next(head)
         for pointer, side in (("tail", prod), ("head", cons)):
             cases = '\n'.join(
                 f'        ({side}_toggles[{i}] != last_{side}_toggle[{i}]) : ({pointer} + 1) mod Q_SIZE;'
-                for i in range(MAX_REDUNDANCY))
+                for i in range(MAX_REDUNDANCY)
+            )
             text = re.sub(
                 rf'next\({pointer}\)\s*:=\s*case.*?esac;',
                 f'next({pointer}) := case\n{cases}\n        TRUE : {pointer};\n    esac;',
-                text, flags=re.DOTALL)
+                text, flags=re.DOTALL
+            )
 
         # Replace next(last_*_toggle) blocks
         for side in (prod, cons):
@@ -73,17 +85,20 @@ class BaseExtender(ABC):
                 f'        ({side}_toggles[{i}] != last_{side}_toggle[{i}]) : {side}_toggles[{i}];\n'
                 f'        TRUE : last_{side}_toggle[{i}];\n'
                 f'    esac;'
-                for i in range(MAX_REDUNDANCY))
+                for i in range(MAX_REDUNDANCY)
+            )
             text = re.sub(
                 rf'next\(last_{side}_toggle\)\s*:=\s*case.*?esac;',
-                nexts, text, flags=re.DOTALL)
+                nexts, text, flags=re.DOTALL
+            )
 
         # Add next(next_*_turn) before DEFINE
         text = re.sub(
             r'(DEFINE)',
             f'    next(next_{prod}_turn) := {_init_set(n_producers)};\n\n'
             f'    next(next_{cons}_turn) := {_init_set(n_consumers)};\n\n'
-            r'\1', text)
+            r'\1', text
+        )
 
         # Add request_consumed DEFINE
         consumed_def = (
@@ -92,19 +107,21 @@ class BaseExtender(ABC):
                 f'last_{cons}_toggle[{i}] != {cons}_toggles[{i}]'
                 for i in range(MAX_REDUNDANCY)
             )
-            + ';\n')
+            + ';\n'
+        )
         text = re.sub(r'(DEFINE\s*\n)', r'\1' + consumed_def, text)
 
         return text
-    
 
-    def _extend_queue_with_producer_id(self, text, n_clients, n_servers):
+
+    def _extend_queue_with_producer_id(self, text: str, n_clients: int, n_servers: int) -> str:
         text = self._extend_queue_base(text, n_clients, n_servers, 'producer', 'consumer')
 
         producer_id_enum = ', '.join(['none'] + [f'clt{i}' for i in range(MAX_REDUNDANCY)])
         text = re.sub(
             r'(VAR\n)',
-            f'\\1    producer_id : array 0..3 of {{{producer_id_enum}}};\n', text)
+            f'\\1    producer_id : array 0..3 of {{{producer_id_enum}}};\n', text
+        )
 
         producer_id_inits = '\n'.join(f'    init(producer_id[{i}]) := none;' for i in range(4))
         text = re.sub(r'(    init\(last_producer_toggle\[0\]\) := FALSE;)', producer_id_inits + r'\n    \1', text)
@@ -116,28 +133,18 @@ class BaseExtender(ABC):
                 for i in range(MAX_REDUNDANCY)
             )
             + f'\n        TRUE : producer_id[{slot}];\n    esac;'
-            for slot in range(4))
+            for slot in range(4)
+        )
 
         text = re.sub(r'(next\(tail\)\s*:=\s*case.*?esac;)', r'\1\n' + producer_id_nexts, text, flags=re.DOTALL)
-
         return text
 
-
-    def _assign_array_from_modules(self, array_name, source, field, n, n_max, default_value='FALSE'):
-        active = ''.join(
-            f'    {array_name}[{i}] := {source}{i + 1}.{field};\n'
-            for i in range(n)
-        )
-
-        padding = ''.join(
-            f'    {array_name}[{i}] := {default_value};\n'
-            for i in range(n, n_max)
-        )
-
+    def _assign_array_from_modules(self, array_name: str, source: str, field: str, n: int, n_max: int, default_value: str = 'FALSE') -> str:
+        active = ''.join(f'    {array_name}[{i}] := {source}{i + 1}.{field};\n' for i in range(n))
+        padding = ''.join(f'    {array_name}[{i}] := {default_value};\n' for i in range(n, n_max))
         return active + padding
 
-
-    def extend(self, modules, fault_model):
+    def extend(self, modules: Dict[str, str], fault_model: FaultModel) -> Dict[str, str]:
         self._fault_model = fault_model
         modules["queue"] = self.extend_queue(modules["queue"])
         modules["client"] = self.extend_client(modules["client"])
@@ -145,26 +152,21 @@ class BaseExtender(ABC):
         modules["wrapper"] = self.extend_wrapper()
         modules["sync"] = self.build_sync_module()
         modules["main"] = self.build_main_module()
-        
         return modules
 
     @abstractmethod
-    def extend_queue(self, text):
-        pass
+    def extend_queue(self, text: str) -> str: ...
 
     @abstractmethod
-    def extend_client(self, text):
-        pass
+    def extend_client(self, text: str) -> str: ...
 
     @abstractmethod
-    def extend_server(self, text):
-        pass
+    def extend_server(self, text: str) -> str: ...
 
     @abstractmethod
-    def extend_wrapper(self):
-        pass
+    def extend_wrapper(self) -> str: ...
 
-    def build_sync_module(self):
+    def build_sync_module(self) -> str:
         return (
             'MODULE Sync()\n'
             'VAR\n'
@@ -172,7 +174,7 @@ class BaseExtender(ABC):
             '    extended : Extended();'
         )
 
-    def build_main_module(self):
+    def build_main_module(self) -> str:
         return (
             'MODULE main\n'
             'VAR\n'
