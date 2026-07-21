@@ -1,8 +1,8 @@
 -- =========================================================
 -- Test case for RR Protocol with the following configuration:
 -- * Client's redundancy = 1
--- * Servers's redundancy = 3
--- * Fault type = stuck_at
+-- * Servers's redundancy = 4
+-- * Fault type = byzantine
 -- * Nondeterministic turn selector
 -- =========================================================
 MODULE Queue(Q_SIZE, producer_toggle, consumer_toggle)
@@ -206,7 +206,7 @@ ASSIGN
     init(last_consumer_toggle[8]) := FALSE;
     init(last_consumer_toggle[9]) := FALSE;
     init(next_producer_turn) := {0};
-    init(next_consumer_turn) := {0,1,2};
+    init(next_consumer_turn) := {0,1,2,3};
 
     next(tail) := case
         (producer_toggles[0] != last_producer_toggle[0]) : (tail + 1) mod Q_SIZE;
@@ -390,7 +390,7 @@ ASSIGN
 
     next(next_producer_turn) := {0};
 
-    next(next_consumer_turn) := {0,1,2};
+    next(next_consumer_turn) := {0,1,2,3};
 
 DEFINE
     request_consumed := last_consumer_toggle[0] != consumer_toggles[0] | last_consumer_toggle[1] != consumer_toggles[1] | last_consumer_toggle[2] != consumer_toggles[2] | last_consumer_toggle[3] != consumer_toggles[3] | last_consumer_toggle[4] != consumer_toggles[4] | last_consumer_toggle[5] != consumer_toggles[5] | last_consumer_toggle[6] != consumer_toggles[6] | last_consumer_toggle[7] != consumer_toggles[7] | last_consumer_toggle[8] != consumer_toggles[8] | last_consumer_toggle[9] != consumer_toggles[9];
@@ -428,7 +428,7 @@ ASSIGN
 
     next(client_ack_state) := case
             client_ack_state = receiving & ack_queue.empty : receiving;
-            client_ack_state = receiving & !ack_queue.empty & request_sent & (ack_owners[0] = self_id | ack_owners[1] = self_id | ack_owners[2] = self_id) : received;
+            client_ack_state = receiving & !ack_queue.empty & request_sent & (ack_owners[0] = self_id | ack_owners[1] = self_id | ack_owners[2] = self_id | ack_owners[3] = self_id) : received;
             client_ack_state = received & !ack_queue.empty : receiving;
             client_ack_state = received & ack_queue.empty : received;
             TRUE : client_ack_state;
@@ -441,21 +441,21 @@ ASSIGN
     esac;
 
     next(ack_toggle) := case
-        client_ack_state = receiving & !ack_queue.empty & request_sent & (ack_owners[0] = self_id | ack_owners[1] = self_id | ack_owners[2] = self_id) : !ack_toggle;                   
+        client_ack_state = receiving & !ack_queue.empty & request_sent & (ack_owners[0] = self_id | ack_owners[1] = self_id | ack_owners[2] = self_id | ack_owners[3] = self_id) : !ack_toggle;                   
         TRUE : ack_toggle;                                                      
     esac;
 
     next(ack_received) := case
         client_request_state = sending & !request_queue.full & ack_received & request_queue.next_producer_turn = client_id &
             (client_states[0] = TRUE) : FALSE;       -- false because a new request has just been sent
-        client_ack_state = receiving & !ack_queue.empty & request_sent & (ack_owners[0] = self_id | ack_owners[1] = self_id | ack_owners[2] = self_id) : TRUE;          -- true because a new ack has been received
+        client_ack_state = receiving & !ack_queue.empty & request_sent & (ack_owners[0] = self_id | ack_owners[1] = self_id | ack_owners[2] = self_id | ack_owners[3] = self_id) : TRUE;          -- true because a new ack has been received
         TRUE : ack_received;           
     esac;
 
     next(request_sent) := case
         client_request_state = sending & !request_queue.full & ack_received & request_queue.next_producer_turn = client_id &
             (client_states[0] = TRUE) : TRUE;
-        client_ack_state = receiving & !ack_queue.empty & request_sent & (ack_owners[0] = self_id | ack_owners[1] = self_id | ack_owners[2] = self_id) : FALSE;
+        client_ack_state = receiving & !ack_queue.empty & request_sent & (ack_owners[0] = self_id | ack_owners[1] = self_id | ack_owners[2] = self_id | ack_owners[3] = self_id) : FALSE;
         TRUE : request_sent;
     esac;
     next(num_requests_sent) := case
@@ -480,7 +480,7 @@ DEFINE
 
 MODULE ServerExtended(request_queue, ack_queue, server_id)
 VAR
-    fault_mode_stuck_at : {none, stuck_receiving, stuck_received};
+    fault_mode_byzantine : {none, byzantine_state};
     server_request_state : {receiving, received};
     server_ack_state : {sending, sent};
     request_toggle : boolean;  
@@ -492,7 +492,7 @@ VAR
     num_requests_received : 0..100;
 
 ASSIGN
-    init(fault_mode_stuck_at) := none;
+    init(fault_mode_byzantine) := none;
     init(server_request_state) := receiving;
     init(server_ack_state) := sending;
     init(request_toggle) := FALSE;
@@ -502,17 +502,16 @@ ASSIGN
     init(pending_ack) := FALSE;
     init(ack_consume_marker) := FALSE;
     init(num_requests_received) := 0;
-    next(fault_mode_stuck_at) :=
+    next(fault_mode_byzantine) :=
         case
-            fault_mode_stuck_at = none : {none, stuck_receiving, stuck_received};
-            TRUE              : fault_mode_stuck_at;
+            fault_mode_byzantine = none : {none, byzantine_state};
+            TRUE              : fault_mode_byzantine;
         esac;
 
 
     next(server_request_state) :=
         case
-        fault_mode_stuck_at = stuck_received : received;
-        fault_mode_stuck_at = stuck_receiving : receiving;
+        fault_mode_byzantine = byzantine_state : {receiving, received};
             server_request_state = receiving & request_queue.empty : receiving;
             server_request_state = receiving & !request_queue.empty & !pending_ack & !request_queue.request_consumed & request_queue.next_consumer_turn = server_id : received;
             server_request_state = received & !request_queue.empty : receiving;
@@ -530,7 +529,7 @@ ASSIGN
         esac;
 
     next(request_toggle) := case
-        fault_mode_stuck_at = none &
+        fault_mode_byzantine = none &
         server_request_state = receiving & !request_queue.empty & !pending_ack & !request_queue.request_consumed & request_queue.next_consumer_turn = server_id : !request_toggle;                   
         TRUE : request_toggle;                                                    
     esac;
@@ -565,7 +564,7 @@ ASSIGN
     esac;
 
     next(num_requests_received) := case
-        fault_mode_stuck_at = none &
+        fault_mode_byzantine = none &
         server_request_state = receiving & !request_queue.empty & !pending_ack & !request_queue.request_consumed & request_queue.next_consumer_turn = server_id & num_requests_received < 100 : num_requests_received + 1;                   
         TRUE : num_requests_received;                                                    
     esac;
@@ -586,6 +585,7 @@ VAR
     server1 : ServerExtended(request_queue, ack_queue, 0);
     server2 : ServerExtended(request_queue, ack_queue, 1);
     server3 : ServerExtended(request_queue, ack_queue, 2);
+    server4 : ServerExtended(request_queue, ack_queue, 3);
     request_queue : QueueExtended(Q_SIZE, request_prod_toggles, request_cons_toggles);
     ack_queue : QueueExtended(Q_SIZE, ack_prod_toggles, ack_cons_toggles);
 ASSIGN
@@ -602,7 +602,7 @@ ASSIGN
     request_cons_toggles[0] := server1.request_toggle;
     request_cons_toggles[1] := server2.request_toggle;
     request_cons_toggles[2] := server3.request_toggle;
-    request_cons_toggles[3] := FALSE;
+    request_cons_toggles[3] := server4.request_toggle;
     request_cons_toggles[4] := FALSE;
     request_cons_toggles[5] := FALSE;
     request_cons_toggles[6] := FALSE;
@@ -612,7 +612,7 @@ ASSIGN
     ack_prod_toggles[0] := server1.ack_toggle;
     ack_prod_toggles[1] := server2.ack_toggle;
     ack_prod_toggles[2] := server3.ack_toggle;
-    ack_prod_toggles[3] := FALSE;
+    ack_prod_toggles[3] := server4.ack_toggle;
     ack_prod_toggles[4] := FALSE;
     ack_prod_toggles[5] := FALSE;
     ack_prod_toggles[6] := FALSE;
@@ -642,7 +642,7 @@ ASSIGN
     ack_owners[0] := server1.request_source;
     ack_owners[1] := server2.request_source;
     ack_owners[2] := server3.request_source;
-    ack_owners[3] := none;
+    ack_owners[3] := server4.request_source;
     ack_owners[4] := none;
     ack_owners[5] := none;
     ack_owners[6] := none;
@@ -657,55 +657,52 @@ VAR
     extended : Extended();
 
 
-LTLSPEC (
-    (X X X X X X X X extended.request_queue.next_consumer_turn = 1) &
-
-    -- Force extended server1 to stay healthy for steps 1-3
-    (extended.server1.fault_mode_stuck_at = none & X extended.server1.fault_mode_stuck_at = none
-    & X X extended.server1.fault_mode_stuck_at = none) &
-
-    -- Force extended server2 to stay healthy for steps 1-9
-    (extended.server2.fault_mode_stuck_at = none & X extended.server2.fault_mode_stuck_at = none
-    & X X extended.server2.fault_mode_stuck_at = none & X X X extended.server2.fault_mode_stuck_at = none
-    & X X X X extended.server2.fault_mode_stuck_at = none & X X X X X extended.server2.fault_mode_stuck_at = none
-    & X X X X X X extended.server2.fault_mode_stuck_at = none & X X X X X X X extended.server2.fault_mode_stuck_at = none
-    & X X X X X X X X extended.server2.fault_mode_stuck_at = none)
-) ->
-    G(nominal.server.num_requests_received =
-    extended.server1.num_requests_received +
-    extended.server2.num_requests_received)
 
 
 LTLSPEC (
     (X X X X X X X X extended.request_queue.next_consumer_turn = 1 &
-    X X X X X X X X X X X X X X extended.request_queue.next_consumer_turn = 2) &
+    X X X X X X X X X X X X X X extended.request_queue.next_consumer_turn = 2 &
+    X X X X X X X X X X X X X X X X X X X X extended.request_queue.next_consumer_turn = 3) &
     
     -- Force extended server1 to stay healthy for steps 1-3
-    (extended.server1.fault_mode_stuck_at = none & X extended.server1.fault_mode_stuck_at = none
-    & X X extended.server1.fault_mode_stuck_at = none) &
+    (extended.server1.fault_mode_byzantine = none & X extended.server1.fault_mode_byzantine = none
+    & X X extended.server1.fault_mode_byzantine = none) &
 
     -- Force extended server2 to stay healthy for steps 1-9
-    (extended.server2.fault_mode_stuck_at = none & X extended.server2.fault_mode_stuck_at = none
-    & X X extended.server2.fault_mode_stuck_at = none & X X X extended.server2.fault_mode_stuck_at = none
-    & X X X X extended.server2.fault_mode_stuck_at = none & X X X X X extended.server2.fault_mode_stuck_at = none
-    & X X X X X X extended.server2.fault_mode_stuck_at = none & X X X X X X X extended.server2.fault_mode_stuck_at = none
-    & X X X X X X X X extended.server2.fault_mode_stuck_at = none) &
+    (extended.server2.fault_mode_byzantine = none & X extended.server2.fault_mode_byzantine = none
+    & X X extended.server2.fault_mode_byzantine = none & X X X extended.server2.fault_mode_byzantine = none
+    & X X X X extended.server2.fault_mode_byzantine = none & X X X X X extended.server2.fault_mode_byzantine = none
+    & X X X X X X extended.server2.fault_mode_byzantine = none & X X X X X X X extended.server2.fault_mode_byzantine = none
+    & X X X X X X X X extended.server2.fault_mode_byzantine = none) &
 
     -- Force extended server3 to stay healthy for steps 1-15
-    (extended.server3.fault_mode_stuck_at = none & X extended.server3.fault_mode_stuck_at = none
-    & X X extended.server3.fault_mode_stuck_at = none & X X X extended.server3.fault_mode_stuck_at = none
-    & X X X X extended.server3.fault_mode_stuck_at = none & X X X X X extended.server3.fault_mode_stuck_at = none
-    & X X X X X X extended.server3.fault_mode_stuck_at = none & X X X X X X X extended.server3.fault_mode_stuck_at = none
-    & X X X X X X X X extended.server3.fault_mode_stuck_at = none & X X X X X X X X X extended.server3.fault_mode_stuck_at = none
-    & X X X X X X X X X X extended.server3.fault_mode_stuck_at = none & X X X X X X X X X X X extended.server3.fault_mode_stuck_at = none
-    & X X X X X X X X X X X X extended.server3.fault_mode_stuck_at = none & X X X X X X X X X X X X X extended.server3.fault_mode_stuck_at = none
-    & X X X X X X X X X X X X X X extended.server3.fault_mode_stuck_at = none)
+    (extended.server3.fault_mode_byzantine = none & X extended.server3.fault_mode_byzantine = none
+    & X X extended.server3.fault_mode_byzantine = none & X X X extended.server3.fault_mode_byzantine = none
+    & X X X X extended.server3.fault_mode_byzantine = none & X X X X X extended.server3.fault_mode_byzantine = none
+    & X X X X X X extended.server3.fault_mode_byzantine = none & X X X X X X X extended.server3.fault_mode_byzantine = none
+    & X X X X X X X X extended.server3.fault_mode_byzantine = none & X X X X X X X X X extended.server3.fault_mode_byzantine = none
+    & X X X X X X X X X X extended.server3.fault_mode_byzantine = none & X X X X X X X X X X X extended.server3.fault_mode_byzantine = none
+    & X X X X X X X X X X X X extended.server3.fault_mode_byzantine = none & X X X X X X X X X X X X X extended.server3.fault_mode_byzantine = none
+    & X X X X X X X X X X X X X X extended.server3.fault_mode_byzantine = none) &
+
+    -- Force extended server4 to stay healthy for steps 1-21
+    (extended.server4.fault_mode_byzantine = none & X extended.server4.fault_mode_byzantine = none
+    & X X extended.server4.fault_mode_byzantine = none & X X X extended.server4.fault_mode_byzantine = none
+    & X X X X extended.server4.fault_mode_byzantine = none & X X X X X extended.server4.fault_mode_byzantine = none
+    & X X X X X X extended.server4.fault_mode_byzantine = none & X X X X X X X extended.server4.fault_mode_byzantine = none
+    & X X X X X X X X extended.server4.fault_mode_byzantine = none & X X X X X X X X X extended.server4.fault_mode_byzantine = none
+    & X X X X X X X X X X extended.server4.fault_mode_byzantine = none & X X X X X X X X X X X extended.server4.fault_mode_byzantine = none
+    & X X X X X X X X X X X X extended.server4.fault_mode_byzantine = none & X X X X X X X X X X X X X extended.server4.fault_mode_byzantine = none
+    & X X X X X X X X X X X X X X extended.server4.fault_mode_byzantine = none & X X X X X X X X X X X X X X X extended.server4.fault_mode_byzantine = none
+    & X X X X X X X X X X X X X X X X extended.server4.fault_mode_byzantine = none & X X X X X X X X X X X X X X X X X extended.server4.fault_mode_byzantine = none
+    & X X X X X X X X X X X X X X X X X X extended.server4.fault_mode_byzantine = none & X X X X X X X X X X X X X X X X X X X extended.server4.fault_mode_byzantine = none
+    & X X X X X X X X X X X X X X X X X X X X extended.server4.fault_mode_byzantine = none)
 ) ->
     G (nominal.server.num_requests_received =
     extended.server1.num_requests_received +
     extended.server2.num_requests_received +
-    extended.server3.num_requests_received)
-
+    extended.server3.num_requests_received + 
+    extended.server4.num_requests_received)
 
 
 MODULE main
